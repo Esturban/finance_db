@@ -1,0 +1,10 @@
+{
+"DB_ENV":"FINANCE",
+"PROJ_NM":"Finance Database - 20181222",
+"TZ_CONFIG":"America/New_York",
+"API_INC":"T",
+"TGT_RTN":"0.20",
+"RFR":"0.03",
+"TRADING_PERIODS":"252"
+
+}
