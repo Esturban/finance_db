@@ -1,0 +1,27 @@
+name: 'PR - Development'
+
+on:
+  push:
+    branches:
+      - 'sprint**' # Support wildcard matching
+      - 'hotfix**'
+    tags:
+      - '*'
+
+jobs:
+  pull-request:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: pull-request
+      uses: repo-sync/pull-request@v2
+      with:
+        source_branch: ""                              # If blank, default: triggered branch
+        destination_branch: "dev"                      # If blank, default: master
+        pr_title: "Pulling ${{ github.ref }} into dev" # Title of pull request
+        pr_body: ":crown: *An automated PR*"           # Full markdown support, requires pr_title to be set
+        pr_reviewer: "Esturban, ${{ github.actor }}"             # Comma-separated list (no spaces)
+        pr_assignee: "${{ github.actor }}"                        # Comma-separated list (no spaces)
+        pr_label: "auto-pr, staging"                   # Comma-separated list (no spaces)
+        pr_allow_empty: false                          # Creates pull request even if there are no changes
+        github_token: ${{ secrets.GITHUB_TOKEN }}
