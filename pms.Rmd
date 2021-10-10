@@ -1,0 +1,225 @@
+---
+title: "Precious Metals"
+author: "E Valencia"
+date: "09/10/2021"
+output: html_document
+params:
+  pct_cols:
+  - r
+  - r5
+  pct_digits: 1
+  last_n_weeks: 30
+  last_n_sessions: 30
+  threshold: 0.05
+resource_files:
+- data/gc_f.RDS
+- data/gvs_f.RDS
+- data/si_f.RDS
+- src/reports/data_transmute.R
+- src/reports/price_bind.R
+- src/reports/quandClean.R
+- src/reports/sparks.R
+---
+
+```{r setup, include=FALSE,global = TRUE}
+knitr::opts_chunk$set(echo = F)
+# sapply(c('Quandl','quantmod','dplyr','apexcharter','ggplot2','DT','htmltools','jsonlite'),require,quietly = T)
+require(Quandl,quietly = T)
+require(quantmod,quietly = T)
+require(dplyr,quietly = T)
+require(ggplot2,quietly = T)
+require(apexcharter,quietly = T)
+require(DT,quietly = T)
+require(htmltools,quietly = T)
+require(jsonlite,quietly = T)
+
+api_key<-jsonlite::fromJSON(here::here("reports","quandl_api.json"))[[1]]
+options("getSymbols.warning4.0" = FALSE)
+Quandl::Quandl.api_key(api_key)
+
+sapply(list.files(here::here("src","reports"),pattern = "*.R",full.names = T),source,globalenv())
+
+if (!file.exists(here::here("data","si_f.RDS"))) {
+  GC_F <- quandClean(stemCode = "CHRIS/CME_GC", verbose = TRUE)#Gold $/t. oz.
+  SI_F <- quandClean(end_date = Sys.Date(), "CHRIS/CME_SI", verbose = TRUE)#Silver $/t. oz.
+  SI_F <- price_bind(SI_F, SI_F_New)
+  GC_F <- price_bind(GC_F, GC_F_New)
+  
+  GVS_F<-zoo::xts(order.by = index(SI_F))
+  
+  GVS_F$Close<-Cl(GC_F)/Cl(SI_F)
+  GVS_F$Open<-Op(GC_F)/Op(SI_F)
+  GVS_F$High<-Hi(GC_F)/Hi(SI_F)
+  GVS_F$Low<-Lo(GC_F)/Lo(SI_F) 
+  GVS_F<-GVS_F[complete.cases(Cl(GVS_F)),]
+  
+  saveRDS(GC_F, here::here("data","gc_f.RDS"))
+  saveRDS(SI_F, here::here("data","si_f.RDS"))
+  saveRDS(GVS_F, here::here("data","gvs_f.RDS"))
+} else{
+  SI_F <- readRDS(here::here("data","si_f.RDS"))
+  GC_F <- readRDS(here::here("data","gc_f.RDS"))
+  GVS_F<-xts(order.by = index(SI_F))
+  GVS_F <- readRDS(here::here("data","gvs_f.RDS"))
+  
+  # if(max(index(SI_F))<Sys.Date() & as.POSIXlt(Sys.Date())$wday %in% 1:5){
+    GC_F_New <- quantmod::getSymbols("GC=F", auto.assign = F)
+    SI_F_New <- quantmod::getSymbols("SI=F", auto.assign = F)
+      SI_F <- price_bind(SI_F, SI_F_New)
+  GC_F <- price_bind(GC_F, GC_F_New)
+
+  # }
+  
+  GVS_F$Close<-Cl(GC_F)/Cl(SI_F)
+  GVS_F$Open<-Op(GC_F)/Op(SI_F)
+  GVS_F$High<-Hi(GC_F)/Hi(SI_F)
+  GVS_F$Low<-Lo(GC_F)/Lo(SI_F) 
+  GVS_F<-price_bind(GVS_F,GVS_F)
+  GVS_F<-GVS_F[complete.cases(Cl(GVS_F)),]
+  saveRDS(GVS_F,here::here("data","gvs_f.RDS"))
+
+  
+}
+
+avg_gvs<-mean(Cl(GVS_F),na.rm=T)
+silver_mean<-as.numeric(last(Cl(GC_F)))/round(avg_gvs,2)
+
+```
+
+# Gold vs. Silver Ratio {.tabset}      
+
+Over time, the Gold vs. Silver Ratio has changed. However, historically from `r min(index(GVS_F))` to `r max(index(GVS_F))`, the average Gold to Silver Ratio is `r round(avg_gvs,2)` where `r max(index(GVS_F))` it is `r round(as.numeric(last(Cl(GVS_F))),2)`, `r scales::percent(round(as.numeric(last(Cl(GVS_F))),2)/round(avg_gvs,2)-1,accuracy=0.1)`  higher than the mean. With Gold prices closing at `r scales::dollar(as.numeric(last(Cl(GC_F))))`, Silver's historical average price would be `r scales::dollar(silver_mean)` having a potential upside of `r scales::percent(silver_mean/round(as.numeric(last(Cl(SI_F))),2)-1,accuracy = 0.1)` 
+
+
+```{r gvs-spark}
+sparks(GVS_F,params$last_n_sessions) 
+
+```
+
+
+
+
+## Silver  {.tabset}  
+
+```{r silver-spark}
+
+sparks(SI_F,params$last_n_sessions) 
+
+```  
+
+
+### Normalized Price by Trading Day    
+
+```{r silver-plot}
+#Edit the timeframes
+si_1<-data_transmute(SI_F['1971::1974'],grp = '1971-1974' )
+si_2<-data_transmute(SI_F['1976::1980'],grp = '1976-1980' )
+si_3<-data_transmute(SI_F['2003::2008'],grp = '2003-2008' )
+si_4<-data_transmute(SI_F['2008::2011'],grp = '2008-2011' )
+si_5<-data_transmute(SI_F['2020::'],grp = '2020-Today' )
+
+
+si_all<-rbind(si_1,si_2,si_3,si_4,si_5)%>%tidyr::complete(ind,cat, fill = list(r5 = NA_real_,val = NA_real_))
+
+si_note<-si_all%>%dplyr::filter(r5>=params$threshold | r5<=-params$threshold,ind>=max(ind)-params$last_n_weeks*7)
+
+apex(data = si_all, type = "line", mapping = aes(x = ind,y = val, fill = cat))%>% 
+  # add_event_marker(
+  #   when = si_note%>%pull(ind),
+  #   y = si_note%>%pull(val),
+  #   label = rep(c('Consumption peak'),nrow(si_note)),
+  #   color = "firebrick"
+  # ) %>%
+  # ax_yaxis(decimalsInFloat = 2) # number of decimals to keep
+  ax_xaxis(max = 1500, tickAmount = 15, 
+           title = list(text = "Number of Trading Days"))%>%
+  ax_yaxis(title = list(text = "Price Per Share, Normalized at 100")) %>%
+  ax_labs(
+    title = "Big Silver Moves",
+    subtitle = paste0("When do we expect to see big moves in Silver?
+                      Last Quote: ",max(index(SI_F))))
+```
+
+
+### Last 10 Sessions  
+
+```{r silver-tbl}
+
+DT::datatable(tail(data.frame(SI_F),10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = params$pct_cols,digits =params$pct_digits)
+
+```
+### Notable Sessions - `r paste0('Last ',params$last_n_weeks,' Weeks')`  
+
+Sessions selected based on report threshold of `r scales::percent(params$threshold)`   
+
+```{r silver-notables}
+
+DT::datatable(tail(data.frame(SI_F[paste0(Sys.Date()-7*params$last_n_weeks,'::')]%>%.[.$r5>=params$threshold]),10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = params$pct_cols,digits =params$pct_digits)
+
+DT::datatable(tail(data.frame(SI_F[paste0(Sys.Date()-7*params$last_n_weeks,'::')]%>%.[.$r5<=-params$threshold]),10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = params$pct_cols,digits =params$pct_digits)
+
+
+
+```
+  
+
+## Gold  {.tabset}  
+   
+```{r gold-spark}
+
+sparks(GC_F,params$last_n_sessions) 
+
+```   
+
+
+### Normalized price by Trading Day  
+
+```{r gold-plot}
+gc_2<-data_transmute(GC_F['1976::1980'],'1976-1980')
+gc_3<-data_transmute(GC_F['2003::2008'],'2003-2008')
+gc_4<-data_transmute(GC_F['2008::2011'],'2008-2011')
+gc_5<-data_transmute(GC_F['2020::'],'2020-Today')
+
+gc_all<-rbind(#gc_1,
+              gc_2,gc_3,gc_4,gc_5)%>%tidyr::complete(ind,cat, fill = list(val = NA_real_,r5 = NA_real_))
+
+gc_note<-gc_all%>%dplyr::filter(r5>=params$threshold | r5<=-params$threshold,ind>=max(ind)-params$last_n_weeks*7)
+
+# gc_all%>%
+# ggplot(aes(x = day,y = d1, color = cat)) + geom_line()
+
+apex(data = gc_all, type = "line", mapping = aes(x = ind,y = val, fill = cat)) %>% 
+  # ax_yaxis(decimalsInFloat = 2) # number of decimals to keep
+  ax_xaxis(max = 1530, tickAmount = 15, 
+           title = list(text = "Number of Trading Days"))%>%
+  ax_yaxis(title = list(text = "Price Per Share, Normalized at 100")) %>%
+  ax_labs(
+    title = "Big Gold Moves",
+    subtitle =paste0("When do we expect to see big moves in Gold?
+                      Last Quote: ",max(index(GC_F)))) 
+
+```
+
+### Last 10 Sessions  
+
+```{r gold-tbl}
+
+DT::datatable(tail(GC_F,10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = c('r','r5'))
+
+```
+  
+### Notable Sessions - `r paste0('Last ',params$last_n_weeks,' Weeks')`  
+
+Sessions selected based on report threshold of `r scales::percent(params$threshold)`   
+
+```{r gold-notables}
+
+DT::datatable(tail(data.frame(GC_F[paste0(Sys.Date()-7*params$last_n_weeks,'::')]%>%.[.$r5>=params$threshold]),10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = params$pct_cols,digits =params$pct_digits)
+
+DT::datatable(tail(data.frame(GC_F[paste0(Sys.Date()-7*params$last_n_weeks,'::')]%>%.[.$r5<=-params$threshold]),10),rownames = T,colnames = c('Open','High','Low','Close','Daily Return (%)',' Last 5 Trading Days Return (%)'),options = list(searching=F,paging = F,info = F))%>%DT::formatPercentage(columns = params$pct_cols,digits =params$pct_digits)
+
+
+
+```
+  
+

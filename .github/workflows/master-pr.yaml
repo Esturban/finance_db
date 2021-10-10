@@ -1,0 +1,26 @@
+name: 'PR - Master'
+
+on:
+  push:
+    branches:
+      - dev  # Support wildcard matching
+    tags:
+      - '*'
+
+jobs:
+  pull-request:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: pull-request
+      uses: repo-sync/pull-request@v2
+      with:
+        source_branch: ""                                 # If blank, default: triggered branch
+        destination_branch: "master"                      # If blank, default: master
+        pr_title: "Pulling ${{ github.ref }} into master" # Title of pull request
+        pr_body: ":crown: *An automated PR*"              # Full markdown support, requires pr_title to be set
+        pr_reviewer: "Esturban"                         # Comma-separated list (no spaces)
+        pr_assignee: "Esturban"                         # Comma-separated list (no spaces)
+        pr_label: "auto-pr, production"                               # Comma-separated list (no spaces)
+        pr_allow_empty: false                              # Creates pull request even if there are no changes
+        github_token: ${{ secrets.GITHUB_TOKEN }}
