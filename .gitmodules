@@ -1,3 +1,6 @@
 [submodule "reports/precious-metals"]
 	path = reports/precious-metals
 	url = https://github.com/Esturban/precious-metals
+[submodule "reports/01-precious-metals"]
+	path = reports/01-precious-metals
+	url = https://github.com/Esturban/precious-metals
