@@ -1,7 +1,7 @@
 ---
 title: "Precious Metals"
 author: "E Valencia"
-date: "09/10/2021"
+date: "`r Sys.Date()`"
 output: html_document
 params:
   pct_cols:
@@ -12,13 +12,14 @@ params:
   last_n_sessions: 30
   threshold: 0.05
 resource_files:
+- src/reports/data_transmute.R
+- src/reports/gold_week.R
+- src/reports/quandClean.R
+- src/reports/silver_week.R
+- src/reports/sparks.R
 - data/gc_f.RDS
 - data/gvs_f.RDS
 - data/si_f.RDS
-- src/reports/data_transmute.R
-- src/reports/price_bind.R
-- src/reports/quandClean.R
-- src/reports/sparks.R
 ---
 
 ```{r setup, include=FALSE,global = TRUE}
@@ -30,59 +31,133 @@ require(dplyr,quietly = T)
 require(ggplot2,quietly = T)
 require(apexcharter,quietly = T)
 require(DT,quietly = T)
+require(rvest,quietly = T)
 require(htmltools,quietly = T)
 require(jsonlite,quietly = T)
 
-api_key<-jsonlite::fromJSON(here::here("reports","quandl_api.json"))[[1]]
+api_key<-jsonlite::fromJSON(here::here("quandl_api.json"))[[1]]
+# av_api_key(jsonlite::fromJSON(here::here("quandl_api.json"))[[2]])
 options("getSymbols.warning4.0" = FALSE)
 Quandl::Quandl.api_key(api_key)
 
+#Load the most recent data from here
 sapply(list.files(here::here("src","reports"),pattern = "*.R",full.names = T),source,globalenv())
 
 if (!file.exists(here::here("data","si_f.RDS"))) {
+  #Load the original long term data from Nasdaq
   GC_F <- quandClean(stemCode = "CHRIS/CME_GC", verbose = TRUE)#Gold $/t. oz.
   SI_F <- quandClean(end_date = Sys.Date(), "CHRIS/CME_SI", verbose = TRUE)#Silver $/t. oz.
-  SI_F <- price_bind(SI_F, SI_F_New)
-  GC_F <- price_bind(GC_F, GC_F_New)
+  #Load the remaining data from yahoo
+  GC_F_New <- quantmod::getSymbols("GC=F", auto.assign = F,from = max(index(GC_F))+1,src = "yahoo")
+  SI_F_New <- quantmod::getSymbols("SI=F", auto.assign = F, from = max(index(SI_F))+1,src = "yahoo")
+  #Append the original source data from Yahoo and Nasdaq
+  GC_F<-rbind(OHLC(GC_F),OHLC(GC_F_New),GC_Last[paste0(max(index(GC_F_New))+1,"::")])
+  SI_F<-rbind(OHLC(SI_F),OHLC(SI_F_New),SI_Last[paste0(max(index(SI_F_New))+1,"::")])
   
-  GVS_F<-zoo::xts(order.by = index(SI_F))
+  #Append the data scraped directly from Yahoo
+  # GC_F <- price_bind(GC_F, GC_Last)
+  # SI_F <- price_bind(SI_F, SI_Last)
+  
+  GVS_F<-xts::xts(order.by = index(SI_F))
   
   GVS_F$Close<-Cl(GC_F)/Cl(SI_F)
   GVS_F$Open<-Op(GC_F)/Op(SI_F)
   GVS_F$High<-Hi(GC_F)/Hi(SI_F)
   GVS_F$Low<-Lo(GC_F)/Lo(SI_F) 
-  GVS_F<-GVS_F[complete.cases(Cl(GVS_F)),]
   
-  saveRDS(GC_F, here::here("data","gc_f.RDS"))
-  saveRDS(SI_F, here::here("data","si_f.RDS"))
-  saveRDS(GVS_F, here::here("data","gvs_f.RDS"))
+
+  GVS_F$r<-Delt(Cl(GVS_F),type = "log")
+  SI_F$r<-Delt(Cl(SI_F),type = "log")
+  GC_F$r<-Delt(Cl(GC_F),type = "log")
+  
+  GVS_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+  
+  SI_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+  
+  GC_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+    saveRDS(GVS_F,here::here("data","gvs_f.RDS"))
+  saveRDS(SI_F,here::here("data","si_f.RDS"))
+  saveRDS(GC_F,here::here("data","gc_f.RDS"))
+
 } else{
   SI_F <- readRDS(here::here("data","si_f.RDS"))
   GC_F <- readRDS(here::here("data","gc_f.RDS"))
-  GVS_F<-xts(order.by = index(SI_F))
-  GVS_F <- readRDS(here::here("data","gvs_f.RDS"))
-  
-  # if(max(index(SI_F))<Sys.Date() & as.POSIXlt(Sys.Date())$wday %in% 1:5){
-    GC_F_New <- quantmod::getSymbols("GC=F", auto.assign = F)
-    SI_F_New <- quantmod::getSymbols("SI=F", auto.assign = F)
-      SI_F <- price_bind(SI_F, SI_F_New)
-  GC_F <- price_bind(GC_F, GC_F_New)
+  # GVS_F <- readRDS(here::here("data","gvs_f.RDS"))
+  if(max(index(GC_F))!=max(index(GC_Last)))   GC_F<-rbind(OHLC(GC_F),GC_Last[paste0(max(index(GC_F))+1,"::")])
+  if(max(index(SI_F))!=max(index(SI_Last)))   SI_F<-rbind(OHLC(SI_F),SI_Last[paste0(max(index(SI_F))+1,"::")])
 
-  # }
+  # if(max(index(SI_F))<Sys.Date() & as.POSIXlt(Sys.Date())$wday %in% 1:5){
+    # GC_F_New <- quantmod::getSymbols("GC=F", auto.assign = F,from = max(index(GC_F))+1,src = "yahoo")
+    # SI_F_New <- quantmod::getSymbols("SI=F", auto.assign = F,from = max(index(SI_F))+1,src = "yahoo")
+  #Append the original source data from Yahoo and Nasdaq
+  # GC_F<-rbind(OHLC(GC_F),OHLC(GC_F_New))
+  # SI_F<-rbind(OHLC(SI_F),OHLC(SI_F_New))
   
+  #Append the data scraped directly from Yahoo
+  # GC_F <- price_bind(GC_F, GC_Last)
+  # SI_F <- price_bind(SI_F, SI_Last)
+  
+  # SI_F<-SI_F[-(nrow(SI_F)-1),]
+  # GC_F<-GC_F[-(nrow(GC_F)-1),]
+  # 
+  GVS_F<-xts(order.by = as.Date(index(SI_F)))
+  
+
   GVS_F$Close<-Cl(GC_F)/Cl(SI_F)
   GVS_F$Open<-Op(GC_F)/Op(SI_F)
   GVS_F$High<-Hi(GC_F)/Hi(SI_F)
   GVS_F$Low<-Lo(GC_F)/Lo(SI_F) 
-  GVS_F<-price_bind(GVS_F,GVS_F)
-  GVS_F<-GVS_F[complete.cases(Cl(GVS_F)),]
+  
+  
+  GVS_F$r<-Delt(Cl(GVS_F),type = "log")
+  SI_F$r<-Delt(Cl(SI_F),type = "log")
+  GC_F$r<-Delt(Cl(GC_F),type = "log")
+  
+  GVS_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+  
+  SI_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+  
+  GC_F%<>%
+    timetk::tk_tbl(preserve_index = T)%>%
+    filter(!is.na(Close))%>%
+    mutate(r5 = rollsumr(r,k=5,fill=NA))%>%
+    timetk::tk_xts(date_var = "index")
+  
+  
   saveRDS(GVS_F,here::here("data","gvs_f.RDS"))
+  saveRDS(SI_F,here::here("data","si_f.RDS"))
+  saveRDS(GC_F,here::here("data","gc_f.RDS"))
 
   
 }
 
 avg_gvs<-mean(Cl(GVS_F),na.rm=T)
-silver_mean<-as.numeric(last(Cl(GC_F)))/round(avg_gvs,2)
+silver_mean<-as.numeric(xts::last(Cl(GC_F)))/round(avg_gvs,2)
 
 ```
 
