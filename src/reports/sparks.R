@@ -5,7 +5,6 @@ sparks<-function(ohlc,period){
     var2 = coredata(tail(ohlc$r,period)),
     var3 = coredata(tail(ohlc$r5,period))
   )
-  
   spark_1<-spark_box(
     data = spark_data[,c('date','Close')],
     title = scales::dollar(mean(spark_data$Close,na.rm=T)), 
@@ -20,7 +19,7 @@ sparks<-function(ohlc,period){
   
   spark_3<-spark_box(
     data = spark_data[,c('date','r5')],
-    title = scales::percent(last(spark_data$r5),accuracy = 0.1), 
+    title = scales::percent(dplyr::last(spark_data$r5),accuracy = 0.1), 
     subtitle = paste0("Last 5 Day Cumulative Returns (%)")
   )
   
